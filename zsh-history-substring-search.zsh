@@ -89,24 +89,15 @@ zmodload -F zsh/parameter
 #
 if [[ $+functions[_zsh_highlight] -eq 0 ]]; then
   #
-  # Dummy implementation of _zsh_highlight()
-  # that simply removes existing highlights
+  # Dummy implementation of _zsh_highlight() that
+  # simply removes any existing highlights when the
+  # user inserts printable characters into $BUFFER.
   #
   function _zsh_highlight() {
-    region_highlight=()
-  }
-
-  #
-  # Remove existing highlights when the user
-  # inserts printable characters into $BUFFER
-  #
-  function ordinary-key-press() {
     if [[ $KEYS == [[:print:]] ]]; then
       region_highlight=()
     fi
-    zle .self-insert
   }
-  zle -N self-insert ordinary-key-press
 
   #
   # The following snippet was taken from the zsh-syntax-highlighting project:
@@ -188,7 +179,7 @@ fi
 function _history-substring-search-begin() {
   setopt localoptions extendedglob
 
-  _history_substring_search_move_cursor_eol=false
+  _history_substring_search_refresh_display=false
   _history_substring_search_query_highlight=
 
   #
@@ -258,8 +249,10 @@ function _history-substring-search-end() {
 
   _history_substring_search_result=$BUFFER
 
-  # move the cursor to the end of the command line
-  if [[ $_history_substring_search_move_cursor_eol == true ]]; then
+  # the search was succesful so display the result properly by clearing away
+  # existing highlights and moving the cursor to the end of the result buffer
+  if [[ $_history_substring_search_refresh_display == true ]]; then
+    region_highlight=()
     CURSOR=${#BUFFER}
   fi
 
@@ -377,7 +370,7 @@ function _history-substring-search-down-history() {
     # going down from the absolute top of history
     if [[ $HISTNO -eq 1 && -z $BUFFER ]]; then
       BUFFER=${history[1]}
-      _history_substring_search_move_cursor_eol=true
+      _history_substring_search_refresh_display=true
 
     # going down from somewhere above the bottom of history
     else
@@ -390,8 +383,18 @@ function _history-substring-search-down-history() {
   false
 }
 
+function _history-substring-search-not-found() {
+  #
+  # Nothing matched the search query, so put it back into the $BUFFER while
+  # highlighting it accordingly so the user can revise it and search again.
+  #
+  _history_substring_search_old_buffer=$BUFFER
+  BUFFER=$_history_substring_search_query
+  _history_substring_search_query_highlight=$HISTORY_SUBSTRING_SEARCH_HIGHLIGHT_NOT_FOUND
+}
+
 function _history-substring-search-up-search() {
-  _history_substring_search_move_cursor_eol=true
+  _history_substring_search_refresh_display=true
 
   #
   # Highlight matches during history-substring-up-search:
@@ -447,9 +450,7 @@ function _history-substring-search-up-search() {
     #    to highlight the current buffer.
     #
     (( _history_substring_search_match_index-- ))
-    _history_substring_search_old_buffer=$BUFFER
-    BUFFER=$_history_substring_search_query
-    _history_substring_search_query_highlight=$HISTORY_SUBSTRING_SEARCH_HIGHLIGHT_NOT_FOUND
+    _history-substring-search-not-found
 
   elif [[ $_history_substring_search_match_index -eq $_history_substring_search_matches_count_plus ]]; then
     #
@@ -466,11 +467,17 @@ function _history-substring-search-up-search() {
     (( _history_substring_search_match_index-- ))
     BUFFER=$_history_substring_search_old_buffer
     _history_substring_search_query_highlight=$HISTORY_SUBSTRING_SEARCH_HIGHLIGHT_FOUND
+
+  else
+    #
+    # We are at the beginning of history and there are no further matches.
+    #
+    _history-substring-search-not-found
   fi
 }
 
 function _history-substring-search-down-search() {
-  _history_substring_search_move_cursor_eol=true
+  _history_substring_search_refresh_display=true
 
   #
   # Highlight matches during history-substring-up-search:
@@ -527,9 +534,7 @@ function _history-substring-search-down-search() {
     #    to highlight the current buffer.
     #
     (( _history_substring_search_match_index++ ))
-    _history_substring_search_old_buffer=$BUFFER
-    BUFFER=$_history_substring_search_query
-    _history_substring_search_query_highlight=$HISTORY_SUBSTRING_SEARCH_HIGHLIGHT_NOT_FOUND
+    _history-substring-search-not-found
 
   elif [[ $_history_substring_search_match_index -eq 0 ]]; then
     #
@@ -546,6 +551,12 @@ function _history-substring-search-down-search() {
     (( _history_substring_search_match_index++ ))
     BUFFER=$_history_substring_search_old_buffer
     _history_substring_search_query_highlight=$HISTORY_SUBSTRING_SEARCH_HIGHLIGHT_FOUND
+
+  else
+    #
+    # We are at the end of history and there are no further matches.
+    #
+    _history-substring-search-not-found
   fi
 }
 
